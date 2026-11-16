@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Claude Overlay Control</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d0d12;
+      color: #e5e5e5;
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .panel {
+      width: 100%;
+      max-width: 520px;
+    }
+    h1 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #d97706;
+      margin-bottom: 24px;
+    }
+    h1 span { color: rgba(255,255,255,0.3); font-weight: 400; }
+
+    label {
+      display: block;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.4);
+      margin-bottom: 6px;
+    }
+
+    textarea {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: #e5e5e5;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      padding: 10px 12px;
+      resize: vertical;
+      min-height: 80px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { border-color: #d97706; }
+
+    select {
+      width: 100%;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 6px;
+      color: #e5e5e5;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      padding: 8px 12px;
+      outline: none;
+      margin-bottom: 16px;
+      cursor: pointer;
+    }
+
+    .row { margin-bottom: 14px; }
+
+    .btn-row { display: flex; gap: 10px; margin-top: 20px; }
+
+    button {
+      flex: 1;
+      background: #d97706;
+      color: #000;
+      border: none;
+      border-radius: 6px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      padding: 10px 16px;
+      cursor: pointer;
+      text-transform: uppercase;
+      transition: background 0.2s, transform 0.1s;
+    }
+    button:hover { background: #f59e0b; }
+    button:active { transform: scale(0.97); }
+    button.secondary {
+      background: rgba(255,255,255,0.08);
+      color: rgba(255,255,255,0.6);
+    }
+    button.secondary:hover { background: rgba(255,255,255,0.14); }
+
+    .status-bar {
+      margin-top: 20px;
+      padding: 10px 14px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 6px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+    }
+    .status-bar.ok { color: #4ade80; border-color: rgba(74,222,128,0.2); }
+    .status-bar.err { color: #f87171; border-color: rgba(248,113,113,0.2); }
+
+    .link {
+      margin-top: 24px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.25);
+    }
+    .link a { color: #d97706; text-decoration: none; }
+    .link a:hover { text-decoration: underline; }
+
+    .current {
+      margin-top: 24px;
+      padding: 12px 14px;
+      background: rgba(217,119,6,0.07);
+      border: 1px solid rgba(217,119,6,0.2);
+      border-radius: 6px;
+      font-size: 12px;
+      color: rgba(255,255,255,0.7);
+      display: none;
+    }
+    .current.show { display: block; }
+    .current .ct { font-size: 10px; color: #d97706; margin-bottom: 4px; letter-spacing: 0.08em; text-transform: uppercase; }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <h1>Claude OBS Overlay <span>/ control</span></h1>
+
+    <div class="row">
+      <label>Type</label>
+      <select id="type">
+        <option value="waiting">Waiting for you</option>
+        <option value="question">Question</option>
+        <option value="info">Info / FYI</option>
+      </select>
+    </div>
+
+    <div class="row">
+      <label>Message</label>
+      <textarea id="msg" placeholder="What is Claude waiting on…"></textarea>
+    </div>
+
+    <div class="btn-row">
+      <button id="sendBtn">Push to Overlay</button>
+      <button class="secondary" id="idleBtn">Set Idle</button>
+    </div>
+
+    <div class="current" id="currentBlock">
+      <div class="ct">Currently showing</div>
+      <div id="currentText"></div>
+    </div>
+
+    <div class="status-bar" id="statusBar">Not connected</div>
+
+    <div class="link">
+      OBS browser source → <a href="http://localhost:3000" target="_blank">http://localhost:3000</a>
+    </div>
+  </div>
+
+  <script>
+    const msgEl = document.getElementById('msg');
+    const typeEl = document.getElementById('type');
+    const statusBar = document.getElementById('statusBar');
+    const currentBlock = document.getElementById('currentBlock');
+    const currentText = document.getElementById('currentText');
+
+    function setStatus(text, cls = '') {
+      statusBar.textContent = text;
+      statusBar.className = 'status-bar ' + cls;
+    }
+
+    async function refreshCurrent() {
+      try {
+        const r = await fetch('/api/status');
+        const d = await r.json();
+        if (d.type !== 'idle' && d.message) {
+          currentBlock.classList.add('show');
+          currentText.textContent = `[${d.type}] ${d.message}`;
+        } else {
+          currentBlock.classList.remove('show');
+        }
+        setStatus('Connected', 'ok');
+      } catch {
+        setStatus('Server not reachable — is node server.js running?', 'err');
+      }
+    }
+
+    document.getElementById('sendBtn').addEventListener('click', async () => {
+      const message = msgEl.value.trim();
+      const type = typeEl.value;
+      if (!message) { setStatus('Enter a message first', 'err'); return; }
+      try {
+        const r = await fetch('/api/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message, type })
+        });
+        if (r.ok) {
+          setStatus('Pushed to overlay', 'ok');
+          refreshCurrent();
+        } else {
+          setStatus('Server error', 'err');
+        }
+      } catch {
+        setStatus('Could not reach server', 'err');
+      }
+    });
+
+    document.getElementById('idleBtn').addEventListener('click', async () => {
+      try {
+        await fetch('/api/idle', { method: 'POST' });
+        setStatus('Set to idle', 'ok');
+        refreshCurrent();
+      } catch {
+        setStatus('Could not reach server', 'err');
+      }
+    });
+
+    setInterval(refreshCurrent, 5000);
+    refreshCurrent();
+  </script>
+</body>
+</html>

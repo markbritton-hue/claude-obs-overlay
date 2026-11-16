@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Overlay</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: transparent;
+      font-family: 'JetBrains Mono', 'Courier New', monospace;
+      display: flex;
+      align-items: flex-end;
+      justify-content: flex-end;
+      min-height: 100vh;
+      padding: 20px 24px;
+      overflow: hidden;
+    }
+
+    .scene {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    /* Speech bubble — smaller */
+    .bubble {
+      position: relative;
+      background: #1a1a1a;
+      border: 2px solid #e05c2a;
+      border-radius: 10px;
+      padding: 11px 16px;
+      max-width: 270px;
+      min-width: 120px;
+      margin-bottom: 4px;
+
+      opacity: 0;
+      transform: translateY(8px) scale(0.93);
+      transform-origin: bottom center;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+    }
+
+    .bubble.visible {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+
+    /* Tail pointing straight down to character */
+    .bubble::after {
+      content: '';
+      position: absolute;
+      bottom: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 8px solid transparent;
+      border-right: 8px solid transparent;
+      border-top: 12px solid #e05c2a;
+    }
+    .bubble::before {
+      content: '';
+      position: absolute;
+      bottom: -9px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-top: 10px solid #1a1a1a;
+      z-index: 1;
+    }
+
+    .pulse-dot {
+      display: inline-block;
+      width: 4px; height: 4px;
+      border-radius: 50%;
+      background: #e05c2a;
+      animation: pulse 1.8s ease-in-out infinite;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: 0.3; transform: scale(0.6); }
+    }
+
+    .bubble-text {
+      font-size: 17px;
+      color: rgba(255,255,255,0.93);
+      line-height: 1.5;
+    }
+
+    .cursor {
+      display: inline-block;
+      width: 2px; height: 0.9em;
+      background: #e05c2a;
+      vertical-align: text-bottom;
+      margin-left: 2px;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* Character */
+    .character {
+      width: 260px;
+      height: 260px;
+      image-rendering: pixelated;
+      flex-shrink: 0;
+    }
+
+    /* Bounce when a new question arrives */
+    .scene.has-question .character {
+      animation: bounce 0.5s ease;
+    }
+    @keyframes bounce {
+      0%   { transform: translateY(0); }
+      35%  { transform: translateY(-14px); }
+      65%  { transform: translateY(-4px); }
+      100% { transform: translateY(0); }
+    }
+
+    /* Clock chip — floats over the robot's head */
+    .char-wrap {
+      position: relative;
+      display: inline-block;
+    }
+    .clock-chip {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-6px) scale(0.9);
+      background: rgba(20, 20, 20, 0.92);
+      border: 1.5px solid #e05c2a;
+      border-radius: 8px;
+      padding: 6px 14px;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+
+      opacity: 0;
+      transition: opacity 0.35s ease, transform 0.35s ease;
+      pointer-events: none;
+      z-index: 10;
+    }
+    .clock-chip.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0) scale(1);
+    }
+    .clock-icon { font-size: 14px; }
+    .clock-time {
+      font-size: 18px;
+      font-weight: 600;
+      color: #e05c2a;
+      letter-spacing: 0.06em;
+    }
+
+    /* Pop-in for bubble */
+    @keyframes pop {
+      0%   { transform: scale(0.82) translateY(10px); opacity: 0; }
+      70%  { transform: scale(1.03) translateY(0);    opacity: 1; }
+      100% { transform: scale(1)    translateY(0);    opacity: 1; }
+    }
+    .bubble.pop {
+      animation: pop 0.38s ease forwards;
+    }
+  </style>
+</head>
+<body>
+  <div class="scene" id="scene">
+    <div class="bubble" id="bubble">
+      <div class="bubble-text" id="bubbleText"><span class="pulse-dot"></span><span class="cursor"></span></div>
+    </div>
+    <div class="char-wrap">
+      <div class="clock-chip" id="clockChip">
+        <span class="clock-icon">🕐</span>
+        <span class="clock-time" id="clockTime"></span>
+      </div>
+      <img class="character" src="claude-character.gif" alt="">
+    </div>
+  </div>
+
+  <script>
+    const scene     = document.getElementById('scene');
+    const bubble    = document.getElementById('bubble');
+    const textEl    = document.getElementById('bubbleText');
+    const clockChip = document.getElementById('clockChip');
+    const clockTime = document.getElementById('clockTime');
+
+    let currentMsg = '';
+    let typeTimer  = null;
+
+    // --- Clock: pops up every 2 minutes for 8 seconds ---
+    const CLOCK_INTERVAL_MS = 2 * 60 * 1000;
+    const CLOCK_SHOW_MS     = 10000;
+    let clockHideTimer = null;
+
+    function formatTime(d) {
+      let h = d.getHours(), m = d.getMinutes();
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12 || 12;
+      return h + ':' + String(m).padStart(2, '0') + ' ' + ampm;
+    }
+
+    function showClock() {
+      clockTime.textContent = formatTime(new Date());
+      clockChip.classList.add('visible');
+      if (clockHideTimer) clearTimeout(clockHideTimer);
+      clockHideTimer = setTimeout(() => clockChip.classList.remove('visible'), CLOCK_SHOW_MS);
+    }
+
+    setTimeout(function tick() {
+      showClock();
+      setTimeout(tick, CLOCK_INTERVAL_MS);
+    }, CLOCK_INTERVAL_MS);
+
+    function escHtml(s) {
+      return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function typewrite(text) {
+      if (typeTimer) clearTimeout(typeTimer);
+      let i = 0;
+      textEl.innerHTML = '';
+      function step() {
+        if (i <= text.length) {
+          textEl.innerHTML = escHtml(text.slice(0, i)) + '<span class="cursor"></span>';
+          i++;
+          typeTimer = setTimeout(step, 20 + Math.random() * 15);
+        } else {
+          textEl.innerHTML = escHtml(text) + '<span class="cursor"></span>';
+        }
+      }
+      step();
+    }
+
+    function applyStatus(status) {
+      const { type, message } = status;
+
+      if (type === 'idle' || !message) {
+        bubble.classList.remove('visible', 'pop');
+        scene.classList.remove('has-question');
+        currentMsg = '';
+        return;
+      }
+
+      if (message === currentMsg) return;
+      currentMsg = message;
+
+      // Trigger bounce on character
+      scene.classList.remove('has-question');
+      void scene.offsetWidth;
+      scene.classList.add('has-question');
+
+      // Pop bubble in
+      bubble.classList.remove('visible', 'pop');
+      void bubble.offsetWidth;
+      bubble.classList.add('visible', 'pop');
+
+      typewrite(message);
+    }
+
+    function connect() {
+      const ws = new WebSocket(`ws://${location.host}`);
+      ws.onmessage = e => { try { applyStatus(JSON.parse(e.data)); } catch {} };
+      ws.onclose = () => setTimeout(connect, 2000);
+      ws.onerror = () => ws.close();
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch('/api/status');
+        applyStatus(await r.json());
+      } catch {}
+    }
+
+    connect();
+    setInterval(poll, 3000);
+    poll();
+  </script>
+</body>
+</html>
