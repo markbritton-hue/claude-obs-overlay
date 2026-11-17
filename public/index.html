@@ -93,6 +93,32 @@
       line-height: 1.5;
     }
 
+    /* Thinking state — muted purple tint */
+    .bubble.state-thinking {
+      border-color: #8b5cf6;
+    }
+    .bubble.state-thinking::after { border-top-color: #8b5cf6; }
+    .bubble.state-thinking .bubble-text { color: rgba(200,180,255,0.9); font-style: italic; }
+
+    /* Working/tool state — teal tint */
+    .bubble.state-working {
+      border-color: #22d3ee;
+    }
+    .bubble.state-working::after { border-top-color: #22d3ee; }
+    .bubble.state-working .bubble-text { color: rgba(180,240,255,0.9); font-size: 15px; }
+
+    /* Dots animation for thinking/working */
+    .dots::after {
+      content: '';
+      animation: dots 1.4s steps(4, end) infinite;
+    }
+    @keyframes dots {
+      0%  { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+    }
+
     .cursor {
       display: inline-block;
       width: 2px; height: 0.9em;
@@ -122,12 +148,12 @@
       100% { transform: translateY(0); }
     }
 
-    /* Clock chip — floats over the robot's head */
+    /* Clock + weather chips — float over the robot's head */
     .char-wrap {
       position: relative;
       display: inline-block;
     }
-    .clock-chip {
+    .info-chip {
       position: absolute;
       top: 18px;
       left: 50%;
@@ -146,17 +172,20 @@
       pointer-events: none;
       z-index: 10;
     }
-    .clock-chip.visible {
+    .info-chip.visible {
       opacity: 1;
       transform: translateX(-50%) translateY(0) scale(1);
     }
-    .clock-icon { font-size: 14px; }
-    .clock-time {
+    .chip-icon { font-size: 14px; }
+    .chip-text {
       font-size: 18px;
       font-weight: 600;
       color: #e05c2a;
       letter-spacing: 0.06em;
     }
+    /* weather chip uses a blue tint */
+    #weatherChip { border-color: #38bdf8; }
+    #weatherChip .chip-text { color: #38bdf8; }
 
     /* Pop-in for bubble */
     @keyframes pop {
@@ -175,28 +204,48 @@
       <div class="bubble-text" id="bubbleText"><span class="pulse-dot"></span><span class="cursor"></span></div>
     </div>
     <div class="char-wrap">
-      <div class="clock-chip" id="clockChip">
-        <span class="clock-icon">🕐</span>
-        <span class="clock-time" id="clockTime"></span>
+      <div class="info-chip" id="clockChip">
+        <span class="chip-icon">🕐</span>
+        <span class="chip-text" id="clockTime"></span>
+      </div>
+      <div class="info-chip" id="weatherChip">
+        <span class="chip-icon" id="weatherIcon"></span>
+        <span class="chip-text" id="weatherText"></span>
       </div>
       <img class="character" src="claude-character.gif" alt="">
     </div>
   </div>
 
   <script>
-    const scene     = document.getElementById('scene');
-    const bubble    = document.getElementById('bubble');
-    const textEl    = document.getElementById('bubbleText');
-    const clockChip = document.getElementById('clockChip');
-    const clockTime = document.getElementById('clockTime');
+    const scene       = document.getElementById('scene');
+    const bubble      = document.getElementById('bubble');
+    const textEl      = document.getElementById('bubbleText');
+    const clockChip   = document.getElementById('clockChip');
+    const clockTime   = document.getElementById('clockTime');
+    const weatherChip = document.getElementById('weatherChip');
+    const weatherIcon = document.getElementById('weatherIcon');
+    const weatherText = document.getElementById('weatherText');
 
     let currentMsg = '';
     let typeTimer  = null;
 
-    // --- Clock: pops up every 2 minutes for 8 seconds ---
-    const CLOCK_INTERVAL_MS = 2 * 60 * 1000;
-    const CLOCK_SHOW_MS     = 10000;
-    let clockHideTimer = null;
+    // --- Weather: fetched from local server (server polls Open-Meteo) ---
+    let cachedWeather = null;
+
+    async function fetchWeather() {
+      try {
+        const r = await fetch('/api/weather');
+        const d = await r.json();
+        if (d.temp !== undefined) cachedWeather = d;
+      } catch {}
+    }
+
+    fetchWeather();
+    setInterval(fetchWeather, 10 * 60 * 1000);
+
+    // --- Clock + weather: pop up every 2 minutes ---
+    const CYCLE_INTERVAL_MS = 2 * 60 * 1000;
+    const CHIP_SHOW_MS      = 8000;
 
     function formatTime(d) {
       let h = d.getHours(), m = d.getMinutes();
@@ -208,14 +257,24 @@
     function showClock() {
       clockTime.textContent = formatTime(new Date());
       clockChip.classList.add('visible');
-      if (clockHideTimer) clearTimeout(clockHideTimer);
-      clockHideTimer = setTimeout(() => clockChip.classList.remove('visible'), CLOCK_SHOW_MS);
+      setTimeout(() => {
+        clockChip.classList.remove('visible');
+        showWeather();
+      }, CHIP_SHOW_MS);
+    }
+
+    function showWeather() {
+      if (!cachedWeather) return;
+      weatherIcon.textContent = cachedWeather.icon;
+      weatherText.textContent = cachedWeather.temp + '°F';
+      weatherChip.classList.add('visible');
+      setTimeout(() => weatherChip.classList.remove('visible'), CHIP_SHOW_MS);
     }
 
     setTimeout(function tick() {
       showClock();
-      setTimeout(tick, CLOCK_INTERVAL_MS);
-    }, CLOCK_INTERVAL_MS);
+      setTimeout(tick, CYCLE_INTERVAL_MS);
+    }, CYCLE_INTERVAL_MS);
 
     function escHtml(s) {
       return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -241,7 +300,7 @@
       const { type, message } = status;
 
       if (type === 'idle' || !message) {
-        bubble.classList.remove('visible', 'pop');
+        bubble.classList.remove('visible', 'pop', 'state-thinking', 'state-working');
         scene.classList.remove('has-question');
         currentMsg = '';
         return;
@@ -255,12 +314,23 @@
       void scene.offsetWidth;
       scene.classList.add('has-question');
 
+      // Apply state classes
+      bubble.classList.remove('state-thinking', 'state-working');
+      if (type === 'thinking') bubble.classList.add('state-thinking');
+      if (type === 'working')  bubble.classList.add('state-working');
+
       // Pop bubble in
       bubble.classList.remove('visible', 'pop');
       void bubble.offsetWidth;
       bubble.classList.add('visible', 'pop');
 
-      typewrite(message);
+      if (type === 'thinking' || type === 'working') {
+        // Show animated dots label instead of typewriting
+        const label = type === 'thinking' ? 'Thinking' : message.replace(/\.\.\.$/, '');
+        textEl.innerHTML = `<span class="dots">${escHtml(label)}</span>`;
+      } else {
+        typewrite(message);
+      }
     }
 
     function connect() {
