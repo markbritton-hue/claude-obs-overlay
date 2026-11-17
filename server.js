@@ -138,6 +138,61 @@ if (fs.existsSync(CLAUDE_PROJECTS)) {
   console.log(`Warning: ${CLAUDE_PROJECTS} not found — transcript watching disabled`);
 }
 
+// Random chatter messages
+const CHAT_MESSAGES = [
+  "Are you still coding?",
+  "Don't forget to blink.",
+  "Have you tried turning it off and on again?",
+  "Coffee break? You've earned it.",
+  "Still here. Just watching.",
+  "How's the bug hunt going?",
+  "You've been at this a while...",
+  "Remember to save your work!",
+  "Is it working yet?",
+  "Rubber duck debugging time?",
+  "Stack Overflow to the rescue?",
+  "Git commit before you forget.",
+  "Any console errors I should know about?",
+  "Need me to explain that error?",
+  "You look like you need a snack.",
+  "What are we building today?",
+  "I believe in you. Mostly.",
+  "Have you checked the logs?",
+  "That variable name looks... creative.",
+  "One more feature won't hurt. Right?",
+];
+
+let lastChatIndex = -1;
+
+function fireChat() {
+  const current = readStatus();
+  if (current.type !== 'idle') {
+    scheduleChat();
+    return;
+  }
+  let idx;
+  do { idx = Math.floor(Math.random() * CHAT_MESSAGES.length); } while (idx === lastChatIndex);
+  lastChatIndex = idx;
+  const msg = CHAT_MESSAGES[idx];
+  const status = writeStatus({ type: 'chat', message: msg });
+  broadcast(status);
+  console.log(`[overlay] Chat: ${msg}`);
+  setTimeout(() => {
+    if (readStatus().type === 'chat') {
+      const s = writeStatus({ type: 'idle', message: '' });
+      broadcast(s);
+    }
+  }, 9000);
+  scheduleChat();
+}
+
+function scheduleChat() {
+  const delay = (8 + Math.random() * 7) * 60 * 1000; // 8–15 min
+  setTimeout(fireChat, delay);
+}
+
+scheduleChat();
+
 // REST endpoints (manual control / fallback)
 app.get('/api/weather', (req, res) => res.json(weatherCache || {}));
 

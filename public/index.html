@@ -93,6 +93,13 @@
       line-height: 1.5;
     }
 
+    /* Chat state — friendly green tint */
+    .bubble.state-chat {
+      border-color: #4ade80;
+    }
+    .bubble.state-chat::after { border-top-color: #4ade80; }
+    .bubble.state-chat .bubble-text { color: rgba(180,255,200,0.95); }
+
     /* Thinking state — muted purple tint */
     .bubble.state-thinking {
       border-color: #8b5cf6;
@@ -300,7 +307,7 @@
       const { type, message } = status;
 
       if (type === 'idle' || !message) {
-        bubble.classList.remove('visible', 'pop', 'state-thinking', 'state-working');
+        bubble.classList.remove('visible', 'pop', 'state-thinking', 'state-working', 'state-chat');
         scene.classList.remove('has-question');
         currentMsg = '';
         return;
@@ -315,9 +322,10 @@
       scene.classList.add('has-question');
 
       // Apply state classes
-      bubble.classList.remove('state-thinking', 'state-working');
+      bubble.classList.remove('state-thinking', 'state-working', 'state-chat');
       if (type === 'thinking') bubble.classList.add('state-thinking');
       if (type === 'working')  bubble.classList.add('state-working');
+      if (type === 'chat')     bubble.classList.add('state-chat');
 
       // Pop bubble in
       bubble.classList.remove('visible', 'pop');
@@ -325,7 +333,6 @@
       bubble.classList.add('visible', 'pop');
 
       if (type === 'thinking' || type === 'working') {
-        // Show animated dots label instead of typewriting
         const label = type === 'thinking' ? 'Thinking' : message.replace(/\.\.\.$/, '');
         textEl.innerHTML = `<span class="dots">${escHtml(label)}</span>`;
       } else {
